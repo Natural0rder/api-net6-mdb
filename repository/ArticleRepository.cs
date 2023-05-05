@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Options;
 using model;
 using model.Configuration;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace repository;

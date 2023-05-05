@@ -13,7 +13,9 @@ ConfigurationManager configuration = builder.Configuration;
 builder.Services.AddSingleton<IMongoClient>(s =>
     new MongoClient(configuration.GetConnectionString("MongoDb"))
 );
+
 builder.Services.AddScoped<IArticleRepository, ArticleRepository>();
+builder.Services.AddScoped<IPlaceRepository, PlaceRepository>();
 builder.Services.AddScoped<IArticleBusiness, ArticleBusiness>();
 
 builder.Services.Configure<MongoDbOptions>(
