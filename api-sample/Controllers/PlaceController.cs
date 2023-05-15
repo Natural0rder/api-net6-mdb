@@ -1,18 +1,9 @@
-﻿
+﻿using api_sample.Controllers.DTO;
 using Microsoft.AspNetCore.Mvc;
 using model;
-using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 
 namespace api_sample.Controllers;
-
-public class PlaceDto
-{
-    public string placeId { get; set;} = string.Empty;
-    public double[] coordinates { get; set; } = new double[] {};
-
-    public string[] availableAssetIds { get; set;} = new string[] {};
-}
 
 [ApiController]
 [Route("api/[controller]")]
@@ -25,7 +16,7 @@ public class PlaceController : ControllerBase
 
 
     [HttpGet("aggregate/{latitude}/{longitude}")]
-    public async Task<IEnumerable<PlaceDto>> GetBtAggregateAsync(double latitude, double longitude, int? limit)
+    public async Task<IEnumerable<PlaceDto>> GetByAggregateAsync(double latitude, double longitude, int? limit)
     {
         var places = await _placeRepository.GetByAggregateAsync(latitude, 
                                                                 longitude, 
