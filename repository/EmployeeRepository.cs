@@ -10,12 +10,14 @@ public class EmployeeRepository : IEmployeeRepository
 {
     private readonly IMongoCollection<Employee> _employeeCollection;
     private readonly IMongoCollection<EmployeeRead> _employeeReadCollection;
+    private readonly IMongoCollection<BsonDocument> _employeeReadBsonCollection;
 
     public EmployeeRepository(IMongoClient mongoClient, IOptions<MongoDbOptions> options)
     {
         var mongoDatabase = mongoClient.GetDatabase(options.Value.Database);
         _employeeCollection = mongoDatabase.GetCollection<Employee>(options.Value.EmployeeCollectionName);
         _employeeReadCollection = mongoDatabase.GetCollection<EmployeeRead>(options.Value.EmployeeCollectionName);
+        _employeeReadBsonCollection = mongoDatabase.GetCollection<BsonDocument>(options.Value.EmployeeCollectionName);
     }
 
     public async Task SetClientIdAsync()
@@ -26,7 +28,7 @@ public class EmployeeRepository : IEmployeeRepository
             var projectionBuilder = Builders<Employee>.Projection;
             var projection = projectionBuilder.Include(x => x.Id);
             Random rnd = new Random();
-            int chunk  = rnd.Next(10, 10000);
+            int chunk = rnd.Next(10, 10000);
             var employeesToUpdate = await _employeeCollection.Find(filterDefinition)
                                                              .Limit(chunk)
                                                              .Project(projection)
@@ -40,7 +42,7 @@ public class EmployeeRepository : IEmployeeRepository
 
             foreach (var employee in employeesToUpdate)
             {
-                listWrites.Add(new UpdateOneModel<Employee>(Builders<Employee>.Filter.Eq(x => x.Id, employee[0]), 
+                listWrites.Add(new UpdateOneModel<Employee>(Builders<Employee>.Filter.Eq(x => x.Id, employee[0]),
                                                             updateDefinition));
             }
 
@@ -56,7 +58,7 @@ public class EmployeeRepository : IEmployeeRepository
 
         if (!string.IsNullOrEmpty(startWith) && startWith?.Length >= 2)
         {
-            filter = filter & 
+            filter = filter &
             (
                 builder.Regex(x => x.FirstName, new BsonRegularExpression($"^{startWith}", "i")) |
                 builder.Regex(x => x.LastName, new BsonRegularExpression($"^{startWith}", "i")) |
@@ -87,11 +89,11 @@ public class EmployeeRepository : IEmployeeRepository
         return sort;
     }
 
-    private (AggregateFacet<EmployeeRead, AggregateCountResult> CountFacet, 
+    private (AggregateFacet<EmployeeRead, AggregateCountResult> CountFacet,
             AggregateFacet<EmployeeRead, EmployeeRead> DataFacet) BuildFacets(
-                string countFacetName, 
-                string dataFacetName, 
-                int page, 
+                string countFacetName,
+                string dataFacetName,
+                int page,
                 int pageSize,
                 SortDefinition<EmployeeRead> sort)
     {
@@ -112,12 +114,11 @@ public class EmployeeRepository : IEmployeeRepository
         return (countFacet, dataFacet);
     }
 
-    public async Task<Page<EmployeeRead>> GetByClientIdAsync(ObjectId clientId, int page = 1, string? startWith = null)
+    public async Task<Page<EmployeeRead>> GetByClientIdAsync(ObjectId clientId, int page, int pageSize, string? startWith = null)
     {
-        int pageSize = 5;
         const string countFacetName = "count";
         const string dataFacetName = "data";
-    
+
         var filter = BuildFilter(clientId, startWith);
         var projection = BuildProjection();
         var sort = BuildSort();
@@ -128,7 +129,7 @@ public class EmployeeRepository : IEmployeeRepository
             .Project<EmployeeRead>(projection)
             .Facet(facets.CountFacet, facets.DataFacet)
             .ToListAsync();
-        
+
         var count = aggregateResult.First()
             .Facets.First(x => x.Name == countFacetName)
             .Output<AggregateCountResult>()
@@ -139,13 +140,139 @@ public class EmployeeRepository : IEmployeeRepository
             .Facets.First(x => x.Name == dataFacetName)
             .Output<EmployeeRead>();
 
-        var currentPage =  new Page<EmployeeRead> {
+        var currentPage = new Page<EmployeeRead>
+        {
             TotalItemsCount = count,
             Items = employees,
             CurrentPage = page,
             PageSize = pageSize,
             CurrentPageSize = employees.Count,
             TotalPagesCount = (((int)count + pageSize - 1) / pageSize)
+        };
+
+        return currentPage;
+    }
+
+    public async Task<Page<EmployeeRead>> SearchAsync(ObjectId clientId, int page, int pageSize, string? startWith = null)
+    {
+        var regexString = $"{startWith}(.*)";
+
+        var searchStage = new BsonDocument("$search",
+                                new BsonDocument {
+                                    { "index", "employeeSearch" },
+                                    { "compound",
+                                        new BsonDocument {
+                                            { 
+                                                "must",
+                                                new BsonArray {
+                                                    new BsonDocument("equals",
+                                                        new BsonDocument
+                                                        {
+                                                            { "path", "clientId" },
+                                                            { "value", clientId }
+                                                        }
+                                                    )
+                                                } 
+                                            },
+                                            { 
+                                                "should",
+                                                new BsonArray {
+                                                    new BsonDocument("regex",
+                                                        new BsonDocument {
+                                                            { "path", "firstName" },
+                                                            { "query", regexString },
+                                                            { "allowAnalyzedField", true }
+                                                        }
+                                                    ),
+                                                    new BsonDocument("regex",
+                                                        new BsonDocument {
+                                                            { "path", "lastName" },
+                                                            { "query", regexString },
+                                                            { "allowAnalyzedField", true }
+                                                        }
+                                                    ),
+                                                    new BsonDocument("regex",
+                                                        new BsonDocument {
+                                                            { "path", "email" },
+                                                            { "query", regexString },
+                                                            { "allowAnalyzedField", true }
+                                                        }
+                                                    )
+                                                } 
+                                            },
+                                            { "minimumShouldMatch", 1 }
+                                        } 
+                                    }   
+                                }
+                            );
+
+        var sortStage = new BsonDocument("$sort",
+                            new BsonDocument {
+                                    { "lastName", 1 },
+                                    { "firstName", 1 }
+                                }
+                            );
+
+        var projectStage = new BsonDocument("$project", 
+                                new BsonDocument {
+                                    { "firstName", 1 },
+                                    { "lastName", 1 },
+                                    { "email", 1 }
+                                }
+                            );
+
+        var facetStage = new BsonDocument("$facet",
+                                new BsonDocument {
+                                    { 
+                                        "rows",
+                                        new BsonArray
+                                        {
+                                            new BsonDocument("$skip", (page - 1) * pageSize),
+                                            new BsonDocument("$limit", pageSize)
+                                        } 
+                                    },
+                                    { 
+                                        "totalRows",
+                                        new BsonArray
+                                        {
+                                            new BsonDocument("$replaceWith", "$$SEARCH_META"),
+                                            new BsonDocument("$limit", 1)
+                                        } 
+                                    }
+                                }
+                            );
+
+        var setStage = new BsonDocument("$set",
+                            new BsonDocument("totalRows",
+                                new BsonDocument("$arrayElemAt",
+                                    new BsonArray {
+                                            "$totalRows.count.lowerBound",
+                                            0
+                                    }
+                                )
+                            )
+                        );
+
+        var searchPipeline = new BsonDocument[]
+        {
+                searchStage,
+                sortStage,
+                projectStage,
+                facetStage,
+                setStage
+        };
+
+        var aggResult = await _employeeReadBsonCollection.Aggregate<PaginatedSearchResult<EmployeeRead>>(searchPipeline)
+                                                         .FirstOrDefaultAsync();
+
+        var currentPage = new Page<EmployeeRead>
+        {
+            TotalItemsCount = aggResult.TotalRows,
+            Items = aggResult.Rows,
+            CurrentPage = page,
+            PageSize = pageSize,
+            CurrentPageSize = aggResult.Rows.Count(),
+            TotalPagesCount = (((int)aggResult.TotalRows + pageSize - 1) / pageSize)
         };
 
         return currentPage;

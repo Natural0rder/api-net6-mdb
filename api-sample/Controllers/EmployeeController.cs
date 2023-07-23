@@ -22,11 +22,34 @@ public class EmployeeController : ControllerBase
         return true;
     }
 
-    [HttpGet("{clientId}/{page}")]
-    public async Task<Page<EmployeeDto>> GetByClientIdAsync(string clientId, int page, string? startWith)
+    [HttpGet("search/{clientId}/{pageSize}/{page}")]
+    public async Task<Page<EmployeeDto>> SearchAsync(string clientId, int pageSize, int page, string? startWith)
     {
         var oidClientId = ObjectId.Parse(clientId);
-        var employeePage = await _employeeRepository.GetByClientIdAsync(oidClientId, page, startWith);
+        var employeePage = await _employeeRepository.SearchAsync(oidClientId, page, pageSize, startWith);
+        var dto = new Page<EmployeeDto> 
+        {
+            PageSize = employeePage.PageSize,
+            TotalPagesCount = employeePage.TotalPagesCount,
+            TotalItemsCount = employeePage.TotalItemsCount,
+            CurrentPage = employeePage.CurrentPage,
+            CurrentPageSize = employeePage.CurrentPageSize,
+            Items = employeePage.Items.Select(x => new EmployeeDto {
+                Id = x.Id.ToString(),
+                LastName = x.LastName,
+                FirstName = x.FirstName,
+                Email = x.Email
+            })
+        };
+
+        return dto;
+    }
+
+    [HttpGet("{clientId}/{pageSize}/{page}")]
+    public async Task<Page<EmployeeDto>> GetByClientIdAsync(string clientId, int pageSize, int page, string? startWith)
+    {
+        var oidClientId = ObjectId.Parse(clientId);
+        var employeePage = await _employeeRepository.GetByClientIdAsync(oidClientId, page, pageSize, startWith);
 
         var dto = new Page<EmployeeDto> 
         {

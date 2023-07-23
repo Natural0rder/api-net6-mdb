@@ -3,6 +3,16 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace model
 {
+    public class PaginatedSearchResult<T>
+    {
+        [BsonElement("rows")]
+        public IEnumerable<T> Rows { get; set; }
+
+        [BsonElement("totalRows")]
+        public int TotalRows { get; set; }
+    }
+
+
     public class Page<T>
     {
         public long TotalItemsCount { get; set;}
