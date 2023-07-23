@@ -8,5 +8,9 @@
         public string ArticlesCollectionName { get; set; } = String.Empty;
 
         public string PlacesCollectionName { get; set; } = String.Empty;
+
+        public string TranslationCollectionName { get; set; } = String.Empty;
+
+        public string EmployeeCollectionName { get; set; } = String.Empty;
     }
 }

@@ -16,6 +16,8 @@ builder.Services.AddSingleton<IMongoClient>(s =>
 
 builder.Services.AddScoped<IArticleRepository, ArticleRepository>();
 builder.Services.AddScoped<IPlaceRepository, PlaceRepository>();
+builder.Services.AddScoped<ITranslationRepository, TranslationRepository>();
+builder.Services.AddScoped<IEmployeeRepository, EmployeeRepository>();
 builder.Services.AddScoped<IArticleBusiness, ArticleBusiness>();
 
 builder.Services.Configure<MongoDbOptions>(
