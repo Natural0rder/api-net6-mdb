@@ -1,0 +1,36 @@
+{
+    "mappings": {
+      "dynamic": false,
+      "fields": {
+        "clientId": {
+          "type": "objectId"
+        },
+        "email": {
+          "analyzer": "keywordLowerer",
+          "type": "string"
+        },
+        "firstName": {
+          "analyzer": "keywordLowerer",
+          "type": "string"
+        },
+        "lastName": {
+          "analyzer": "keywordLowerer",
+          "type": "string"
+        }
+      }
+    },
+    "analyzers": [
+      {
+        "charFilters": [],
+        "name": "keywordLowerer",
+        "tokenFilters": [
+          {
+            "type": "lowercase"
+          }
+        ],
+        "tokenizer": {
+          "type": "keyword"
+        }
+      }
+    ]
+  }

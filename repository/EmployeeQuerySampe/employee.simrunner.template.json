@@ -1,0 +1,38 @@
+{
+    "_comment": "Then run IEmployeeRepository.SetClientIdAsync()",
+    "connectionString":"mongodb+srv://<usr>:<pwd>@<cluster>.mongodb.net/?retryWrites=true&w=majority",
+    "http": {
+        "enabled": true,
+        "port": 3000,
+        "host": "0.0.0.0"
+    },
+    "reportInterval": 1000,
+    "templates": [
+        {
+            "name": "simple",
+            "database": "edenred",
+            "collection": "employee",
+            "drop":false,
+            "template": {
+             "email": "%internet.emailAddress",
+             "firstName": "%name.firstName",
+             "lastName": "%name.lastName",
+             "birthDate": "%date.birthday",
+             "isDeleted": false,
+             "status": "active"
+           }
+        }
+    ],
+    "workloads": [
+        {
+            "comment": "Insert a simple record every 10ms",
+            "name": "Insert",
+            "template": "simple",
+            "op": "insert",
+            "threads": 3,
+            "pace": 10,
+            "batch": 1000
+        }
+    ]
+ }
+ 

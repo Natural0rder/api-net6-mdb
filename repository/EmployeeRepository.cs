@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using model;
 using model.Configuration;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 
 namespace repository;
@@ -11,6 +12,9 @@ public class EmployeeRepository : IEmployeeRepository
     private readonly IMongoCollection<Employee> _employeeCollection;
     private readonly IMongoCollection<EmployeeRead> _employeeReadCollection;
     private readonly IMongoCollection<BsonDocument> _employeeReadBsonCollection;
+
+    private const string __AUTOCOMPLETE = "autocomplete";
+    private const string __REGEX = "regex";
 
     public EmployeeRepository(IMongoClient mongoClient, IOptions<MongoDbOptions> options)
     {
@@ -50,6 +54,8 @@ public class EmployeeRepository : IEmployeeRepository
             Console.WriteLine($"{bulkWriteResult.ModifiedCount} items updated.");
         }
     }
+
+    #region BTree implementation private members
 
     private FilterDefinition<EmployeeRead> BuildFilter(ObjectId clientId, string? startWith = null)
     {
@@ -114,6 +120,8 @@ public class EmployeeRepository : IEmployeeRepository
         return (countFacet, dataFacet);
     }
 
+    #endregion
+
     public async Task<Page<EmployeeRead>> GetByClientIdAsync(ObjectId clientId, int page, int pageSize, string? startWith = null)
     {
         const string countFacetName = "count";
@@ -123,6 +131,12 @@ public class EmployeeRepository : IEmployeeRepository
         var projection = BuildProjection();
         var sort = BuildSort();
         var facets = BuildFacets(countFacetName, dataFacetName, page, pageSize, sort);
+
+       
+        var agg = _employeeReadCollection.Aggregate()
+            .Match(filter)
+            .Project<EmployeeRead>(projection)
+            .Facet(facets.CountFacet, facets.DataFacet);
 
         var aggregateResult = await _employeeReadCollection.Aggregate()
             .Match(filter)
@@ -153,8 +167,137 @@ public class EmployeeRepository : IEmployeeRepository
         return currentPage;
     }
 
-    public async Task<Page<EmployeeRead>> SearchAsync(ObjectId clientId, int page, int pageSize, string? startWith = null)
+    #region Search implementation private members
+
+    private BsonArray BuildSearchMustCondition(ObjectId clientId)
     {
+        return new BsonArray {
+                    new BsonDocument("equals",
+                        new BsonDocument
+                        {
+                            { "path", "clientId" },
+                            { "value", clientId }
+                        }
+                    )
+                };
+    }
+
+    private BsonDocument BuildSearchSortStage()
+    {
+        return new BsonDocument("$sort",
+                new BsonDocument {
+                        { "lastName", 1 },
+                        { "firstName", 1 }
+                    }
+                );
+    }
+
+    private BsonDocument BuildSearchProjectStage()
+    {
+        return new BsonDocument("$project", 
+                    new BsonDocument {
+                        { "firstName", 1 },
+                        { "lastName", 1 },
+                        { "email", 1 }
+                    }
+                );
+    }
+
+    private BsonDocument BuildSearchFacetStage(int page, int pageSize)
+    {
+        return new BsonDocument("$facet",
+                    new BsonDocument {
+                        { 
+                            "rows",
+                            new BsonArray
+                            {
+                                new BsonDocument("$skip", (page - 1) * pageSize),
+                                new BsonDocument("$limit", pageSize)
+                            } 
+                        },
+                        { 
+                            "totalRows",
+                            new BsonArray
+                            {
+                                new BsonDocument("$replaceWith", "$$SEARCH_META"),
+                                new BsonDocument("$limit", 1)
+                            } 
+                        }
+                    }
+                );
+    }
+
+    private BsonDocument BuildSearchSetStage()
+    {
+        return new BsonDocument("$set",
+                    new BsonDocument("totalRows",
+                        new BsonDocument("$arrayElemAt",
+                            new BsonArray {
+                                    "$totalRows.count.lowerBound",
+                                    0
+                            }
+                        )
+                    )
+                );
+    }
+
+    private BsonArray BuildSearchShouldCondition(string queryString, string searchMode)
+    {
+        if (searchMode == __AUTOCOMPLETE)
+        {
+            return new BsonArray {
+                        new BsonDocument("autocomplete",
+                            new BsonDocument {
+                                { "path", "firstName" },
+                                { "query", queryString }
+                            }
+                        ),
+                        new BsonDocument("autocomplete",
+                            new BsonDocument {
+                                { "path", "lastName" },
+                                { "query", queryString }
+                            }
+                        ),
+                        new BsonDocument("autocomplete",
+                            new BsonDocument {
+                                { "path", "email" },
+                                { "query", queryString }
+                            }
+                        )
+                    };
+        }
+
+        return new BsonArray {
+                    new BsonDocument("regex",
+                        new BsonDocument {
+                            { "path", "firstName" },
+                            { "query", queryString },
+                            { "allowAnalyzedField", true }
+                        }
+                    ),
+                    new BsonDocument("regex",
+                        new BsonDocument {
+                            { "path", "lastName" },
+                            { "query", queryString },
+                            { "allowAnalyzedField", true }
+                        }
+                    ),
+                    new BsonDocument("regex",
+                        new BsonDocument {
+                            { "path", "email" },
+                            { "query", queryString },
+                            { "allowAnalyzedField", true }
+                        }
+                    )
+                };
+    }
+
+    #endregion
+
+    public async Task<Page<EmployeeRead>> SearchAsync(ObjectId clientId, int page, int pageSize, string startWith)
+    {
+        if (string.IsNullOrEmpty(startWith)) throw new ArgumentNullException(nameof(startWith));
+
         var regexString = $"{startWith}(.*)";
 
         var searchStage = new BsonDocument("$search",
@@ -164,41 +307,11 @@ public class EmployeeRepository : IEmployeeRepository
                                         new BsonDocument {
                                             { 
                                                 "must",
-                                                new BsonArray {
-                                                    new BsonDocument("equals",
-                                                        new BsonDocument
-                                                        {
-                                                            { "path", "clientId" },
-                                                            { "value", clientId }
-                                                        }
-                                                    )
-                                                } 
+                                                BuildSearchMustCondition(clientId) 
                                             },
                                             { 
                                                 "should",
-                                                new BsonArray {
-                                                    new BsonDocument("regex",
-                                                        new BsonDocument {
-                                                            { "path", "firstName" },
-                                                            { "query", regexString },
-                                                            { "allowAnalyzedField", true }
-                                                        }
-                                                    ),
-                                                    new BsonDocument("regex",
-                                                        new BsonDocument {
-                                                            { "path", "lastName" },
-                                                            { "query", regexString },
-                                                            { "allowAnalyzedField", true }
-                                                        }
-                                                    ),
-                                                    new BsonDocument("regex",
-                                                        new BsonDocument {
-                                                            { "path", "email" },
-                                                            { "query", regexString },
-                                                            { "allowAnalyzedField", true }
-                                                        }
-                                                    )
-                                                } 
+                                                BuildSearchShouldCondition(regexString, __REGEX) 
                                             },
                                             { "minimumShouldMatch", 1 }
                                         } 
@@ -206,60 +319,61 @@ public class EmployeeRepository : IEmployeeRepository
                                 }
                             );
 
-        var sortStage = new BsonDocument("$sort",
-                            new BsonDocument {
-                                    { "lastName", 1 },
-                                    { "firstName", 1 }
-                                }
-                            );
+        var searchPipeline = new BsonDocument[]
+        {
+                searchStage,
+                BuildSearchSortStage(),
+                BuildSearchProjectStage(),
+                BuildSearchFacetStage(page, pageSize),
+                BuildSearchSetStage()
+        };
 
-        var projectStage = new BsonDocument("$project", 
+        var aggResult = await _employeeReadBsonCollection.Aggregate<PaginatedSearchResult<EmployeeRead>>(searchPipeline)
+                                                         .FirstOrDefaultAsync();
+
+        var currentPage = new Page<EmployeeRead>
+        {
+            TotalItemsCount = aggResult.TotalRows,
+            Items = aggResult.Rows,
+            CurrentPage = page,
+            PageSize = pageSize,
+            CurrentPageSize = aggResult.Rows.Count(),
+            TotalPagesCount = (((int)aggResult.TotalRows + pageSize - 1) / pageSize)
+        };
+
+        return currentPage;
+    }
+
+    public async Task<Page<EmployeeRead>> SearchAutocompleteAsync(ObjectId clientId, int page, int pageSize, string startWith)
+    {
+        if (string.IsNullOrEmpty(startWith)) throw new ArgumentNullException(nameof(startWith));
+
+        var searchStage = new BsonDocument("$search",
                                 new BsonDocument {
-                                    { "firstName", 1 },
-                                    { "lastName", 1 },
-                                    { "email", 1 }
+                                    { "index", "employeeSearchAutocomplete" },
+                                    { "compound",
+                                        new BsonDocument {
+                                            { 
+                                                "must",
+                                                BuildSearchMustCondition(clientId) 
+                                            },
+                                            { 
+                                                "should",
+                                                BuildSearchShouldCondition(startWith, __AUTOCOMPLETE)
+                                            },
+                                            { "minimumShouldMatch", 1 }
+                                        } 
+                                    }   
                                 }
                             );
-
-        var facetStage = new BsonDocument("$facet",
-                                new BsonDocument {
-                                    { 
-                                        "rows",
-                                        new BsonArray
-                                        {
-                                            new BsonDocument("$skip", (page - 1) * pageSize),
-                                            new BsonDocument("$limit", pageSize)
-                                        } 
-                                    },
-                                    { 
-                                        "totalRows",
-                                        new BsonArray
-                                        {
-                                            new BsonDocument("$replaceWith", "$$SEARCH_META"),
-                                            new BsonDocument("$limit", 1)
-                                        } 
-                                    }
-                                }
-                            );
-
-        var setStage = new BsonDocument("$set",
-                            new BsonDocument("totalRows",
-                                new BsonDocument("$arrayElemAt",
-                                    new BsonArray {
-                                            "$totalRows.count.lowerBound",
-                                            0
-                                    }
-                                )
-                            )
-                        );
 
         var searchPipeline = new BsonDocument[]
         {
                 searchStage,
-                sortStage,
-                projectStage,
-                facetStage,
-                setStage
+                BuildSearchSortStage(),
+                BuildSearchProjectStage(),
+                BuildSearchFacetStage(page, pageSize),
+                BuildSearchSetStage()
         };
 
         var aggResult = await _employeeReadBsonCollection.Aggregate<PaginatedSearchResult<EmployeeRead>>(searchPipeline)

@@ -23,10 +23,33 @@ public class EmployeeController : ControllerBase
     }
 
     [HttpGet("search/{clientId}/{pageSize}/{page}")]
-    public async Task<Page<EmployeeDto>> SearchAsync(string clientId, int pageSize, int page, string? startWith)
+    public async Task<Page<EmployeeDto>> SearchAsync(string clientId, int pageSize, int page, string startWith)
     {
         var oidClientId = ObjectId.Parse(clientId);
         var employeePage = await _employeeRepository.SearchAsync(oidClientId, page, pageSize, startWith);
+        var dto = new Page<EmployeeDto> 
+        {
+            PageSize = employeePage.PageSize,
+            TotalPagesCount = employeePage.TotalPagesCount,
+            TotalItemsCount = employeePage.TotalItemsCount,
+            CurrentPage = employeePage.CurrentPage,
+            CurrentPageSize = employeePage.CurrentPageSize,
+            Items = employeePage.Items.Select(x => new EmployeeDto {
+                Id = x.Id.ToString(),
+                LastName = x.LastName,
+                FirstName = x.FirstName,
+                Email = x.Email
+            })
+        };
+
+        return dto;
+    }
+
+     [HttpGet("search-autocomplete/{clientId}/{pageSize}/{page}")]
+    public async Task<Page<EmployeeDto>> SearchAutocompleteAsync(string clientId, int pageSize, int page, string startWith)
+    {
+        var oidClientId = ObjectId.Parse(clientId);
+        var employeePage = await _employeeRepository.SearchAutocompleteAsync(oidClientId, page, pageSize, startWith);
         var dto = new Page<EmployeeDto> 
         {
             PageSize = employeePage.PageSize,
